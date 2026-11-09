@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
+import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
 import android.webkit.MimeTypeMap;
@@ -17,11 +18,19 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
+import android.widget.TextView;
 import android.widget.Toast;
 
+import org.json.JSONObject;
+
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -46,13 +55,16 @@ public class MainActivity extends Activity {
     private static final Map<String, String> MIME = new HashMap<>();
 
     static {
-        MIME.put("html", "text/html; charset=utf-8");
-        MIME.put("htm", "text/html; charset=utf-8");
-        MIME.put("js", "text/javascript; charset=utf-8");
-        MIME.put("mjs", "text/javascript; charset=utf-8");
-        MIME.put("css", "text/css; charset=utf-8");
-        MIME.put("json", "application/json; charset=utf-8");
-        MIME.put("webmanifest", "application/manifest+json; charset=utf-8");
+        // Charset указываем ТОЛЬКО вторым аргументом WebResourceResponse (encoding).
+        // Если прописать его внутри mimeType, часть версий WebView отдаёт рендереру
+        // невалидный Content-Type — и документ показывается текстом, а не рисуется.
+        MIME.put("html", "text/html");
+        MIME.put("htm", "text/html");
+        MIME.put("js", "text/javascript");
+        MIME.put("mjs", "text/javascript");
+        MIME.put("css", "text/css");
+        MIME.put("json", "application/json");
+        MIME.put("webmanifest", "application/manifest+json");
         MIME.put("svg", "image/svg+xml");
         MIME.put("png", "image/png");
         MIME.put("jpg", "image/jpeg");
@@ -100,6 +112,14 @@ public class MainActivity extends Activity {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 return serveLocal(request.getUrl());
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                // Через небольшую паузу проверяем, что документ отрисован как HTML
+                // и приложение запустилось; если нет — аварийная автономная загрузка.
+                view.postDelayed(() -> verifyRender(view, url), 400);
             }
         });
 
@@ -153,11 +173,184 @@ public class MainActivity extends Activity {
 
         try {
             InputStream in = getAssets().open(path);
+            logServe(path + "=" + mime);
             return new WebResourceResponse(mime, "UTF-8", in);
         } catch (IOException e) {
-            return new WebResourceResponse("text/plain", "UTF-8",
-                    new ByteArrayInputStream(new byte[0]));
+            logServe(path + "!нет");
+            if (mime.startsWith("text/html")) {
+                // Главный документ: отдаём HTML-страницу ошибки. Раньше здесь был
+                // пустой text/plain — WebView показал бы его как текст.
+                String page = "<!doctype html><html lang=\"ru\"><head><meta charset=\"utf-8\">"
+                        + "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+                        + "<title>Дзен счётчик</title></head>"
+                        + "<body style=\"font-family:sans-serif;background:#0b1020;color:#e8ecff;"
+                        + "padding:24px\"><h3>Дзен счётчик</h3><p>Не удалось открыть файл:<br>"
+                        + path + "</p></body></html>";
+                return new WebResourceResponse("text/html", "UTF-8",
+                        new ByteArrayInputStream(page.getBytes(StandardCharsets.UTF_8)));
+            }
+            return null; // прочие файлы — WebView сам разберётся (в сеть выйти нечем)
         }
+    }
+
+    /* ============ Контроль рендера, аварийный путь и диагностика ============ */
+
+    private final Object logLock = new Object();
+    private final StringBuilder serveLog = new StringBuilder();
+    private boolean inlineFallbackUsed = false;
+    private boolean diagBannerShown = false;
+
+    private void logServe(String entry) {
+        synchronized (logLock) {
+            if (serveLog.length() > 300) serveLog.setLength(0);
+            serveLog.append(entry).append("; ");
+        }
+    }
+
+    private String serveLogText() {
+        synchronized (logLock) {
+            return serveLog.toString();
+        }
+    }
+
+    /** Читает файл из assets в строку UTF-8; null, если файла нет. */
+    private String readAssetText(String path) {
+        try (InputStream in = getAssets().open(path)) {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            return new String(out.toByteArray(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Собирает страницу в один HTML: CSS и JS встроены прямо внутрь.
+     * Такой документ отрисовывается без единого перехваченного запроса —
+     * аварийный путь, когда отдача из assets по somehow не срабатывает.
+     */
+    private String buildInlinedPage() {
+        String html = readAssetText("www/index.html");
+        String css = readAssetText("www/styles.css");
+        String js = readAssetText("www/app.js");
+        if (html == null || css == null || js == null) return null;
+        html = html.replace("<link rel=\"stylesheet\" href=\"styles.css\" />",
+                "<style>\n" + css + "\n</style>");
+        html = html.replace("<script src=\"app.js\" defer></script>",
+                "<script>\n" + js + "\n</script>");
+        return html;
+    }
+
+    private static final String JS_PROBE =
+            "(function(){try{var b=document.body?document.body.innerText:'';"
+            + "return JSON.stringify({ct:String(document.contentType||''),"
+            + "zen:String(typeof window.__zen),"
+            + "sh:(document.styleSheets?document.styleSheets.length:0),"
+            + "head:b.replace(/\\s+/g,' ').slice(0,60)})"
+            + "}catch(e){return JSON.stringify({err:String(e)})}})()";
+
+    /**
+     * Проверяет, что документ отрисован как HTML и приложение запустилось.
+     * Иначе один раз перезагружает страницу автономно (всё встроено в HTML),
+     * а если и это не помогло — показывает диагностику поверх WebView.
+     */
+    private void verifyRender(final WebView view, final String url) {
+        if (view == null || url == null || !url.startsWith("https://" + APP_HOST)) return;
+        final boolean fallback = inlineFallbackUsed;
+        try {
+            view.evaluateJavascript(JS_PROBE, value -> {
+                String ct = "", zen = "", head = "", err = "";
+                int sheets = -1;
+                if (value != null && !"null".equals(value)) {
+                    try {
+                        JSONObject o = new JSONObject(value);
+                        ct = o.optString("ct", "");
+                        zen = o.optString("zen", "");
+                        head = o.optString("head", "");
+                        sheets = o.optInt("sh", -1);
+                        err = o.optString("err", "");
+                    } catch (Exception ignore) {
+                    }
+                }
+                boolean rendered = ct.contains("html") && "object".equals(zen);
+                String stage = fallback ? "inline" : "primary";
+                report(stage, rendered ? "ok" : (value == null ? "js-off" : ct),
+                        zen, sheets, head, err);
+                if (rendered) return;
+
+                if (!fallback) {
+                    String html = buildInlinedPage();
+                    if (html != null) {
+                        inlineFallbackUsed = true;
+                        view.loadDataWithBaseURL(APP_URL, html, "text/html", "UTF-8", null);
+                        return;
+                    }
+                }
+                showDiag("стадия: " + stage
+                        + "\ncontentType: " + (ct.isEmpty() ? "?" : ct)
+                        + "\njs: " + (zen.isEmpty() ? "нет" : zen)
+                        + "\nлистов стилей: " + sheets
+                        + "\nurl: " + url
+                        + "\nперехват: " + serveLogText()
+                        + (err.isEmpty() ? "" : "\nошибка: " + err)
+                        + (head.isEmpty() ? "" : "\nтекст: " + head));
+            });
+        } catch (Throwable t) {
+            logServe("probe:" + t.getClass().getSimpleName());
+        }
+    }
+
+    /** Технический отчёт в локальный сервер разработки; сбои тихо игнорируются. */
+    private void report(final String stage, final String ct, final String zen,
+                        final int sheets, final String head, final String err) {
+        new Thread(() -> {
+            try {
+                String ver;
+                try {
+                    ver = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+                } catch (Exception e) {
+                    ver = "?";
+                }
+                String q = "v=" + enc(ver) + "&stage=" + enc(stage) + "&ct=" + enc(ct)
+                        + "&zen=" + enc(zen) + "&sh=" + sheets + "&head=" + enc(head)
+                        + "&err=" + enc(err) + "&serve=" + enc(serveLogText());
+                HttpURLConnection c = (HttpURLConnection)
+                        new URL("http://127.0.0.1:8765/r?" + q).openConnection();
+                c.setConnectTimeout(1200);
+                c.setReadTimeout(1200);
+                c.getResponseCode();
+                c.disconnect();
+            } catch (Throwable ignored) {
+            }
+        }).start();
+    }
+
+    private static String enc(String s) {
+        try {
+            return URLEncoder.encode(s == null ? "" : s, "UTF-8");
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /** Полоса диагностики поверх страницы — чтобы её можно было снять на скриншоте. */
+    private void showDiag(final String text) {
+        if (diagBannerShown) return;
+        diagBannerShown = true;
+        runOnUiThread(() -> {
+            TextView tv = new TextView(MainActivity.this);
+            tv.setText("ДИАГНОСТИКА ДЗЕН\n" + text);
+            tv.setTextColor(Color.WHITE);
+            tv.setBackgroundColor(0xF0000000);
+            tv.setTextSize(11);
+            tv.setPadding(24, 32, 24, 24);
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP);
+            addContentView(tv, lp);
+        });
     }
 
     @Override

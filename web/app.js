@@ -10,6 +10,25 @@
 
 /* ================= Константы ================= */
 const STORAGE_KEY = 'zen-counter-state-v1';
+
+/* Хранилище состояния.
+   localStorage может быть недоступен (приватный режим, неполноценный origin при
+   загрузке страницы обёрткой) — тогда молча работаем в памяти, чтобы приложение
+   не падало: счёт продолжит идти, просто не переживёт перезапуск. */
+const store = (() => {
+  try {
+    localStorage.setItem(STORAGE_KEY + '-probe', '1');
+    localStorage.removeItem(STORAGE_KEY + '-probe');
+    return localStorage;
+  } catch {
+    const mem = new Map();
+    return {
+      getItem: (k) => (mem.has(k) ? mem.get(k) : null),
+      setItem: (k, v) => mem.set(k, String(v)),
+      removeItem: (k) => mem.delete(k)
+    };
+  }
+})();
 const APP_VERSION = '1.0.0';
 
 const THEMES = {
@@ -129,7 +148,7 @@ function sanitizePreset(p) {
 
 function loadState() {
   try {
-    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    const raw = JSON.parse(store.getItem(STORAGE_KEY));
     if (!raw || !Array.isArray(raw.presets) || !raw.presets.length) return freshState();
     const base = freshState();
     const presets = raw.presets.map((p, i) => sanitizePreset({ ...DEFAULT_PRESET, ...p, id: String(p.id || `preset-${i + 1}`) }));
@@ -159,7 +178,7 @@ function persist(immediate) {
     saveTimer = null;
     lastSaveAt = Date.now();
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      store.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch {
       /* хранило переполнено — молча игнорируем, счёт не прерываем */
     }
@@ -1348,7 +1367,7 @@ async function importSound(file) {
 
 function safeSave() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    store.setItem(STORAGE_KEY, JSON.stringify(state));
     lastSaveAt = Date.now();
     return true;
   } catch {

@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- Разрешён только http на localhost: туда приложение шлёт короткий
+         технический отчёт для диагностики; прочие адреса — исключительно https. -->
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -11,7 +13,7 @@
         android:label="@string/app_name"
         android:hardwareAccelerated="true"
         android:supportsRtl="true"
-        android:usesCleartextTraffic="false"
+        android:usesCleartextTraffic="true"
         android:theme="@style/Theme.ZenCounter">
 
         <activity
