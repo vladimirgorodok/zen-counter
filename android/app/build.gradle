@@ -1,0 +1,38 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.zencounter.app'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.zencounter.app"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0.0"
+    }
+
+    buildTypes {
+        debug {
+            applicationIdSuffix ""
+        }
+        release {
+            minifyEnabled false
+            shrinkResources false
+            // Для удобной установки APK подписывается debug-ключом.
+            // Для публикации создайте свой keystore и замените конфигурацию.
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+// Внешних зависимостей нет: ресурсы раздаются из assets собственным
+// shouldInterceptRequest (см. MainActivity), поэтому проект собирается
+// быстрее и не требует доступа к Maven.

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Фон окна: повторяет заставку, чтобы не было белой вспышки при запуске -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <gradient
+        android:angle="270"
+        android:endColor="#0b1020"
+        android:startColor="#1c1a45" />
+</shape>

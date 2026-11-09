@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024" role="img" aria-label="Дзен счётчик">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0a0f1e"/>
+      <stop offset="52%" stop-color="#161a3c"/>
+      <stop offset="100%" stop-color="#241b52"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="18%" r="70%">
+      <stop offset="0%" stop-color="#22d3ee" stop-opacity=".55"/>
+      <stop offset="55%" stop-color="#7c3aed" stop-opacity=".18"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="78%" cy="86%" r="60%">
+      <stop offset="0%" stop-color="#fbbf24" stop-opacity=".35"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="enso" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#22d3ee"/>
+      <stop offset="48%" stop-color="#a78bfa"/>
+      <stop offset="100%" stop-color="#fbbf24"/>
+    </linearGradient>
+    <linearGradient id="lotus" x1="0" y1="0" x2="0.4" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="60%" stop-color="#dbeafe"/>
+      <stop offset="100%" stop-color="#a5b4fc"/>
+    </linearGradient>
+    <filter id="blur" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="26"/>
+    </filter>
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="10"/>
+    </filter>
+  </defs>
+
+  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
+  <rect width="1024" height="1024" rx="224" fill="url(#glow)"/>
+  <rect width="1024" height="1024" rx="224" fill="url(#glow2)"/>
+
+  <!-- тёплое свечение энсо -->
+  <circle cx="512" cy="512" r="288" fill="none" stroke="url(#enso)" stroke-width="86" opacity=".35"
+          stroke-linecap="round" stroke-dasharray="1630 180" transform="rotate(66 512 512)" filter="url(#blur)"/>
+
+  <!-- энсо: кистевой круг с разрывом -->
+  <circle cx="512" cy="512" r="288" fill="none" stroke="url(#enso)" stroke-width="58"
+          stroke-linecap="round" stroke-dasharray="1630 180" transform="rotate(66 512 512)"/>
+  <circle cx="512" cy="512" r="288" fill="none" stroke="#ffffff" stroke-width="14" opacity=".28"
+          stroke-linecap="round" stroke-dasharray="1630 180" transform="rotate(66 512 512)"/>
+
+  <!-- внутреннее свечение -->
+  <circle cx="512" cy="512" r="250" fill="#ffffff" opacity=".045"/>
+
+  <!-- лотос -->
+  <g transform="translate(164 201) scale(2.9)" fill="url(#lotus)">
+    <path d="M120 86 C108 98 108 118 120 130 C132 118 132 98 120 86 Z"/>
+    <path d="M99 100 C86 106 82 122 92 132 C105 126 109 111 99 100 Z"/>
+    <path d="M141 100 C154 106 158 122 148 132 C135 126 131 111 141 100 Z"/>
+    <path d="M80 118 C69 126 68 142 78 149 C90 141 91 127 80 118 Z"/>
+    <path d="M160 118 C171 126 172 142 162 149 C150 141 149 127 160 118 Z"/>
+  </g>
+  <circle cx="512" cy="392" r="20" fill="#ffffff" opacity=".9" filter="url(#soft)"/>
+</svg>

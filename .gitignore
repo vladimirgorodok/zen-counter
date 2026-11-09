@@ -1,0 +1,19 @@
+# Зависимости (без косой черты: ловит и каталоги, и симлинки)
+node_modules
+tests/node_modules
+
+# Сборка
+android/.gradle/
+android/build/
+android/build-manual/
+android/app/build/
+android/local.properties
+android/app/src/main/assets/www/
+android/debug.keystore
+
+# Редакторы и система
+.idea/
+.vscode/
+*.iml
+.DS_Store
+*.log
