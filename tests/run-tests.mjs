@@ -106,6 +106,14 @@ async function openApp(browser, url) {
   await page.goto(url, { waitUntil: 'load' });
   await page.waitForFunction(() => window.__zen && window.__zen.ready, null, { timeout: 15000 });
   const hadSplash = await page.evaluate(() => !!document.getElementById('splash'));
+  // Снимаем заставку до того, как она скроется (авто-скрытие через 3 с)
+  const splashVisible = await page.evaluate(() => {
+    const s = document.getElementById('splash');
+    return !!s && !s.classList.contains('is-hidden');
+  });
+  if (splashVisible) {
+    await page.screenshot({ path: path.join(SHOTS, '00-splash.png') });
+  }
   await page.evaluate(() => window.__zen.skipSplash());
   await page.waitForTimeout(850); // ждём удаления заставки
   return { context, page, errors, hadSplash };
@@ -426,7 +434,7 @@ const lines = [
   '',
   '## Скриншоты',
   '',
-  ...['01-counter-running', '02-countdown', '03-celebration', '04-presets', '05-settings', '06-theme-mystic', '07-theme-sea-counter', '08-desktop'].map(
+  ...['00-splash', '01-counter-running', '02-countdown', '03-celebration', '04-presets', '05-settings', '06-theme-mystic', '07-theme-sea-counter', '08-desktop'].map(
     (n) => `- ![${n}](screenshots/${n}.png)`
   ),
   ''
