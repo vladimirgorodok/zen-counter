@@ -706,6 +706,11 @@ select:focus-visible {
   animation: wave-slide 5.4s linear infinite reverse;
 }
 
+/* Свечение кромки жидкости — волна читается даже на тёмной теме */
+.wave-crest {
+  filter: drop-shadow(0 0 9px var(--glow-soft));
+}
+
 @keyframes wave-slide {
   from {
     transform: translateX(0);
@@ -737,6 +742,8 @@ select:focus-visible {
   background-clip: text;
   color: transparent;
   filter: drop-shadow(0 0 26px var(--glow-soft));
+  /* Тёмный ореол: цифра остаётся читаемой, когда сфера залита яркой жидкостью */
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.65), 0 0 34px rgba(0, 0, 0, 0.4);
   transition: opacity 0.25s ease;
 }
 
@@ -752,6 +759,7 @@ select:focus-visible {
   color: var(--muted);
   font-size: 13px;
   letter-spacing: 0.08em;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.55);
 }
 
 .count-status {

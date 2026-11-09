@@ -22,6 +22,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import org.json.JSONObject;
+import org.json.JSONTokener;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -199,6 +200,9 @@ public class MainActivity extends Activity {
     private final StringBuilder serveLog = new StringBuilder();
     private boolean inlineFallbackUsed = false;
     private boolean diagBannerShown = false;
+    /** Страница сама сообщила (ZenBridge.rendered), что приложение запустилось. */
+    private volatile boolean renderReported = false;
+    private TextView diagView = null;
 
     private void logServe(String entry) {
         synchronized (logLock) {
@@ -243,13 +247,19 @@ public class MainActivity extends Activity {
         return html;
     }
 
+    /**
+     * Проба состояния страницы. Возвращает объект, а не JSON.stringify:
+     * evaluateJavascript сам упаковывает результат в JSON, а двойная упаковка
+     * превращалась в строку — разбор молча падал и окно диагностики
+     * срабатывало ложно.
+     */
     private static final String JS_PROBE =
             "(function(){try{var b=document.body?document.body.innerText:'';"
-            + "return JSON.stringify({ct:String(document.contentType||''),"
+            + "return {ct:String(document.contentType||''),"
             + "zen:String(typeof window.__zen),"
             + "sh:(document.styleSheets?document.styleSheets.length:0),"
-            + "head:b.replace(/\\s+/g,' ').slice(0,60)})"
-            + "}catch(e){return JSON.stringify({err:String(e)})}})()";
+            + "head:b.replace(/\\s+/g,' ').slice(0,60)}"
+            + "}catch(e){return {err:String(e)}}})()";
 
     /**
      * Проверяет, что документ отрисован как HTML и приложение запустилось.
@@ -261,16 +271,25 @@ public class MainActivity extends Activity {
         final boolean fallback = inlineFallbackUsed;
         try {
             view.evaluateJavascript(JS_PROBE, value -> {
+                if (renderReported) return; // страница уже подтвердила запуск
                 String ct = "", zen = "", head = "", err = "";
                 int sheets = -1;
                 if (value != null && !"null".equals(value)) {
                     try {
-                        JSONObject o = new JSONObject(value);
-                        ct = o.optString("ct", "");
-                        zen = o.optString("zen", "");
-                        head = o.optString("head", "");
-                        sheets = o.optInt("sh", -1);
-                        err = o.optString("err", "");
+                        // Разбираем в два шага: наружу может прийти и объект,
+                        // и строка с JSON внутри — оба варианта должны читаться.
+                        Object parsed = new JSONTokener(value).nextValue();
+                        if (parsed instanceof String) {
+                            parsed = new JSONTokener((String) parsed).nextValue();
+                        }
+                        if (parsed instanceof JSONObject) {
+                            JSONObject o = (JSONObject) parsed;
+                            ct = o.optString("ct", "");
+                            zen = o.optString("zen", "");
+                            head = o.optString("head", "");
+                            sheets = o.optInt("sh", -1);
+                            err = o.optString("err", "");
+                        }
                     } catch (Exception ignore) {
                     }
                 }
@@ -335,11 +354,16 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** Полоса диагностики поверх страницы — чтобы её можно было снять на скриншоте. */
+    /** Полоса диагностики поверх страницы — только при реально неудачном старте. */
     private void showDiag(final String text) {
-        if (diagBannerShown) return;
+        if (diagBannerShown || renderReported) return;
         diagBannerShown = true;
         runOnUiThread(() -> {
+            if (renderReported) {
+                // Пока собирали окно, страница успела подтвердить запуск
+                diagBannerShown = false;
+                return;
+            }
             TextView tv = new TextView(MainActivity.this);
             tv.setText("ДИАГНОСТИКА ДЗЕН\n" + text);
             tv.setTextColor(Color.WHITE);
@@ -349,7 +373,20 @@ public class MainActivity extends Activity {
             FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT,
                     FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP);
+            diagView = tv;
             addContentView(tv, lp);
+        });
+    }
+
+    /** Убирает полосу диагностики, когда страница подтвердила запуск. */
+    private void removeDiag() {
+        runOnUiThread(() -> {
+            TextView v = diagView;
+            diagView = null;
+            diagBannerShown = false;
+            if (v != null && v.getParent() instanceof FrameLayout) {
+                ((FrameLayout) v.getParent()).removeView(v);
+            }
         });
     }
 
@@ -403,6 +440,18 @@ public class MainActivity extends Activity {
                     getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
                 }
             });
+        }
+
+        /**
+         * Страница сама подтверждает, что отрисована и приложение запустилось.
+         * Основной сигнал «всё хорошо»: он приходит из работающего JS и не
+         * зависит от формата, в котором evaluateJavascript возвращает результат.
+         */
+        @android.webkit.JavascriptInterface
+        public void rendered() {
+            renderReported = true;
+            removeDiag();
+            report("bridge", "ok", "object", -1, "", "");
         }
 
         @android.webkit.JavascriptInterface

@@ -391,6 +391,45 @@ try {
   await page.evaluate(() => window.__zen.skipSplash());
   await page.waitForTimeout(800);
 
+  /* 8.1 Жидкость в сфере отражает прогресс */
+  const readWater = () =>
+    page.evaluate(() => {
+      const el = document.getElementById('water');
+      const m = (el && el.style.transform ? el.style.transform : '').match(/translateY\(([-\d.]+)px\)/);
+      const stops = Array.from(document.querySelectorAll('#waterGrad stop')).map((s) =>
+        Number(s.getAttribute('stop-opacity') || 0)
+      );
+      const crests = document.querySelectorAll('.wave-slide path[style*="stroke"]').length;
+      return { y: m ? Number(m[1]) : null, stops, crests };
+    });
+
+  await page.evaluate(() => {
+    const p = window.__zen.state.presets.find((x) => x.id === window.__zen.state.activePresetId);
+    p.total_reps = 100;
+    p.count_up = true;
+    window.__zen.setCountdown(0);
+  });
+  await page.evaluate(() => window.__zen.setCount(0));
+  const water0 = await readWater();
+  await page.evaluate(() => window.__zen.setCount(50));
+  const water50 = await readWater();
+  await page.evaluate(() => window.__zen.setCount(100));
+  const water100 = await readWater();
+
+  record(
+    'Жидкость в сфере поднимается с прогрессом',
+    water0.y === 340 && Math.abs(water50.y - 170) < 0.5 && water100.y === 0,
+    `0 → ${water0.y}px, 50 → ${water50.y}px, 100 → ${water100.y}px`
+  );
+  record(
+    'Жидкость заметная (градиент яркий)',
+    water0.stops.length === 3 && water0.stops[0] >= 0.9,
+    `stop-opacity: ${water0.stops.join(' / ')}`
+  );
+  record('Кромка волны отрисована', water0.crests === 2, `слоёв с подсветкой: ${water0.crests}`);
+  await page.waitForTimeout(650);
+  await shot('09-water-fill');
+
   /* 9. Широкий экран */
   await page.setViewportSize({ width: 1280, height: 860 });
   await page.waitForTimeout(400);
@@ -434,7 +473,7 @@ const lines = [
   '',
   '## Скриншоты',
   '',
-  ...['00-splash', '01-counter-running', '02-countdown', '03-celebration', '04-presets', '05-settings', '06-theme-mystic', '07-theme-sea-counter', '08-desktop'].map(
+  ...['00-splash', '01-counter-running', '02-countdown', '03-celebration', '04-presets', '05-settings', '06-theme-mystic', '07-theme-sea-counter', '09-water-fill', '08-desktop'].map(
     (n) => `- ![${n}](screenshots/${n}.png)`
   ),
   ''

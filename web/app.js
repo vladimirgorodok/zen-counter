@@ -461,6 +461,15 @@ function toggleRun() {
 
 /* ================= Звук и вибро ================= */
 let audioCtx = null;
+let masterBus = null;
+let audioLimiter = null;
+let activeVoices = 0;
+let customAudio = null;
+let customAudioName = '';
+
+/* Потолок одновременных голосов: на коротком интервале десятки осцилляторов
+   дают просадку аудиопотока — отсюда треск на слабых устройствах. */
+const MAX_VOICES = 8;
 
 function ensureAudio() {
   try {
@@ -468,6 +477,18 @@ function ensureAudio() {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return null;
       audioCtx = new AC();
+      // Общая шина с ограничителем. Без него наложение звуков (длинная чаша
+      // при коротком интервале) упирается в клиппинг — динамик «рипает».
+      audioLimiter = audioCtx.createDynamicsCompressor();
+      audioLimiter.threshold.value = -14;
+      audioLimiter.knee.value = 18;
+      audioLimiter.ratio.value = 12;
+      audioLimiter.attack.value = 0.004;
+      audioLimiter.release.value = 0.22;
+      masterBus = audioCtx.createGain();
+      masterBus.gain.value = 0.85;
+      masterBus.connect(audioLimiter);
+      audioLimiter.connect(audioCtx.destination);
     }
     if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
     return audioCtx;
@@ -486,29 +507,61 @@ function haptic(pattern) {
 }
 
 function tone(ctx, { freq, endFreq, type = 'sine', dur = 0.3, vol = 0.12, attack = 0.006, delay = 0 }) {
-  const t0 = ctx.currentTime + delay;
+  // Контекст ещё не разогрет: планирование в «замороженные» часы обрывает
+  // огибающую — громкость вскакивает мгновенно, динамик хлопает.
+  if (ctx.state !== 'running') return false;
+  if (activeVoices >= MAX_VOICES) return false;
+
+  const now = ctx.currentTime;
+  // Запас 8 мс: фаза атаки всегда попадает в будущее, даже если звук
+  // запланирован чуть позже реального старта контекста.
+  const t0 = Math.max(now + 0.008, now + delay);
+  const attackTime = Math.max(0.005, attack);
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
   osc.type = type;
   osc.frequency.setValueAtTime(freq, t0);
   if (endFreq) osc.frequency.exponentialRampToValueAtTime(Math.max(20, endFreq), t0 + dur);
   gain.gain.setValueAtTime(0.0001, t0);
-  gain.gain.exponentialRampToValueAtTime(vol, t0 + attack);
+  gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, vol), t0 + attackTime);
   gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  // Полная тишина до остановки — stop() на слышимом уровне даёт щелчок.
+  gain.gain.setValueAtTime(0, t0 + dur + 0.02);
   osc.connect(gain);
-  gain.connect(ctx.destination);
+  gain.connect(masterBus || ctx.destination);
+  activeVoices += 1;
+  osc.onended = () => {
+    activeVoices = Math.max(0, activeVoices - 1);
+    try {
+      gain.disconnect();
+    } catch (e) {
+      /* уже отключено */
+    }
+  };
   osc.start(t0);
   osc.stop(t0 + dur + 0.05);
+  return true;
 }
 
-function playSound(name, customSounds = []) {
+function playSound(name, customSounds = [], allowRetry = true) {
   if (state.muted || !name || name === 'none') return;
   const custom = (customSounds || []).find((s) => s.name === name);
   if (custom && custom.dataUrl) {
     try {
-      const audio = new Audio(custom.dataUrl);
-      audio.volume = 0.5;
-      audio.play().catch(() => {});
+      // Один элемент на звук: повторные тики не плодят наложенные копии —
+      // именно наложение и «рипит» динамик.
+      if (!customAudio || customAudioName !== name) {
+        customAudio = new Audio(custom.dataUrl);
+        customAudioName = name;
+        customAudio.volume = 0.5;
+      }
+      customAudio.pause();
+      try {
+        customAudio.currentTime = 0;
+      } catch (e) {
+        /* поток ещё не готов */
+      }
+      customAudio.play().catch(() => {});
     } catch (e) {
       /* не воспроизводится — тихо игнорируем */
     }
@@ -516,6 +569,17 @@ function playSound(name, customSounds = []) {
   }
   const ctx = ensureAudio();
   if (!ctx) return;
+  if (ctx.state !== 'running') {
+    // Контекст только что создан — даём ему стартовать и повторяем ровно один раз
+    if (allowRetry) {
+      ctx.resume()
+        .then(() => {
+          if (!state.muted) playSound(name, customSounds, false);
+        })
+        .catch(() => {});
+    }
+    return;
+  }
   try {
     switch (name) {
       case 'click':
@@ -592,8 +656,11 @@ function beadsMarkup(goal) {
   return out;
 }
 
-const WAVE_D =
-  'M-320,0 Q-240,-8 -160,0 T0,0 T160,0 T320,0 T480,0 T640,0 L640,400 L-320,400 Z';
+/* Кромка волны (общая для заливки и подсветки поверхности) и сама заливка.
+   Период 160 совпадает с шагом анимации сдвига — стык бесшовный.
+   Амплитуда 14: волна читается отчётливо, но не «уводит» взгляд от числа. */
+const WAVE_TOP = 'M-320,0 Q-240,-14 -160,0 T0,0 T160,0 T320,0 T480,0 T640,0';
+const WAVE_D = `${WAVE_TOP} L640,400 L-320,400 Z`;
 
 function renderCounter() {
   const p = activePreset();
@@ -628,8 +695,9 @@ function renderCounter() {
               <stop offset="100%" style="stop-color:var(--accent3)"></stop>
             </linearGradient>
             <linearGradient id="waterGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" style="stop-color:var(--accent)" stop-opacity="0.55"></stop>
-              <stop offset="100%" style="stop-color:var(--accent2)" stop-opacity="0.1"></stop>
+              <stop offset="0%" style="stop-color:var(--accent)" stop-opacity="0.93"></stop>
+              <stop offset="55%" style="stop-color:var(--accent2)" stop-opacity="0.78"></stop>
+              <stop offset="100%" style="stop-color:var(--accent3)" stop-opacity="0.62"></stop>
             </linearGradient>
             <clipPath id="dialClip"><circle cx="160" cy="160" r="132"></circle></clipPath>
           </defs>
@@ -637,10 +705,15 @@ function renderCounter() {
           <g clip-path="url(#dialClip)">
             <g class="water" id="water" style="transform:translateY(340px)">
               <g class="wave-slide wave-slide-back">
-                <path d="${WAVE_D}" fill="url(#waterGrad)" opacity="0.34"></path>
+                <path d="${WAVE_D}" fill="url(#waterGrad)" opacity="0.42"></path>
+                <path d="${WAVE_TOP}" fill="none" stroke-width="2.4" stroke-opacity="0.35"
+                      style="stroke:var(--accent)"></path>
               </g>
               <g class="wave-slide">
-                <path d="${WAVE_D}" fill="url(#waterGrad)" opacity="0.6"></path>
+                <path d="${WAVE_D}" fill="url(#waterGrad)" opacity="1"></path>
+                <path d="${WAVE_TOP}" fill="none" stroke-width="3.4" stroke-opacity="0.95"
+                      stroke-linecap="round" class="wave-crest"
+                      style="stroke:var(--accent)"></path>
               </g>
             </g>
           </g>
@@ -1665,6 +1738,13 @@ window.__zen = {
     activePreset().countdown_seconds = clamp(Number(seconds) || 0, 0, 15);
     persist(true);
   },
+  /** Ставит значение счётчика и перерисовывает экран (нужно тестам жидкости). */
+  setCount(n) {
+    const p = activePreset();
+    state.count = clamp(Math.round(Number(n) || 0), 0, Math.max(1, p.total_reps));
+    persist(true);
+    updateCounter();
+  },
   skipSplash: hideSplash,
   save: () => persist(true),
   setTheme(id) {
@@ -1682,3 +1762,13 @@ buildAmbient();
 render();
 initSplash();
 window.__zen.ready = true;
+
+/* Сообщаем обёртке, что страница отрисована и приложение запустилось.
+   Это главный сигнал «всё в порядке»: evaluateJavascript на части устройств
+   возвращает результат в другом формате и давал ложное срабатывание
+   окна диагностики. */
+try {
+  if (window.ZenBridge && typeof window.ZenBridge.rendered === 'function') window.ZenBridge.rendered();
+} catch (e) {
+  /* обёртки нет (браузер) — обычный режим PWA */
+}
