@@ -454,6 +454,15 @@ public class MainActivity extends Activity {
             report("bridge", "ok", "object", -1, "", "");
         }
 
+        /**
+         * Снимок здоровья аудио со страницы: помогает отличить хлопок
+         * синтеза от сбоя аудиовыхода (late/rej/lag — в полезной нагрузке).
+         */
+        @android.webkit.JavascriptInterface
+        public void audioDiag(final String payload) {
+            report("audio", payload, "", -1, "", "");
+        }
+
         @android.webkit.JavascriptInterface
         public void vibrate(final int ms) {
             runOnUiThread(() -> {

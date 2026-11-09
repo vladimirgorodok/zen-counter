@@ -16,8 +16,8 @@ SDK="${ANDROID_HOME:-$ROOT/../_tools/android-sdk}"
 PLATFORM="$SDK/platforms/android-34/android.jar"
 BT="$SDK/build-tools/34.0.0"
 PKG="com.zencounter.app"
-VERSION="1.0.2"
-VERSION_CODE="3"
+VERSION="1.0.3"
+VERSION_CODE="4"
 
 need() {
   command -v "$1" >/dev/null 2>&1 || { echo "Не найдена команда: $1" >&2; exit 1; }

@@ -462,38 +462,118 @@ function toggleRun() {
 /* ================= Звук и вибро ================= */
 let audioCtx = null;
 let masterBus = null;
-let audioLimiter = null;
+let dcBlock = null;
+let shaper = null;
 let activeVoices = 0;
 let customAudio = null;
 let customAudioName = '';
 
-/* Потолок одновременных голосов: на коротком интервале десятки осцилляторов
-   дают просадку аудиопотока — отсюда треск на слабых устройствах. */
-const MAX_VOICES = 8;
+/* Потолок одновременных голосов. Чаша — это 3 голоса по 1.3–1.6 с: при
+   интервале 500 мс нужно 9 голосов. При потолке 8 новые атаки отсекались
+   и чаша «пульсировала». 18 голосов = 6 полных отрезков чаши. */
+const MAX_VOICES = 18;
+
+/* Запас планирования. Если старт уходит в прошлом (главный поток задержался
+   записью состояния или отрисовкой), вся огибающая «перепрыгивается»:
+   громкость вскакивает мгновенно — это и есть хлопок из динамика. */
+const SCHEDULE_LEAD = 0.025;
 
 function ensureAudio() {
   try {
     if (!audioCtx) {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return null;
-      audioCtx = new AC();
-      // Общая шина с ограничителем. Без него наложение звуков (длинная чаша
-      // при коротком интервале) упирается в клиппинг — динамик «рипает».
-      audioLimiter = audioCtx.createDynamicsCompressor();
-      audioLimiter.threshold.value = -14;
-      audioLimiter.knee.value = 18;
-      audioLimiter.ratio.value = 12;
-      audioLimiter.attack.value = 0.004;
-      audioLimiter.release.value = 0.22;
+      try {
+        // «balanced» — просторнее дефолтного буфера: на Android слишком
+        // маленький буфер аудиовыхода не успевает наполняться → щелчки.
+        audioCtx = new AC({ latencyHint: 'balanced' });
+      } catch (e) {
+        audioCtx = new AC();
+      }
+      // Шина: уровень → срез постоянной составляющей → мягкий ограничитель.
+      //
+      // Жёсткий компрессор здесь не годится: с порогом −14 дБ он на каждом
+      // входе тона «придавливал» громкость почти на 9 дБ за 4 мс — на слух
+      // это глухой хлопок поверх звука. tanh-ограничитель работает без
+      // атаки и релиза: обычный уровень проходит почти без изменений,
+      // а пики срезаются плавно и физически не могут уйти в клиппинг.
+      dcBlock = audioCtx.createBiquadFilter();
+      dcBlock.type = 'highpass';
+      dcBlock.frequency.value = 22;
+      dcBlock.Q.value = 0.7;
+      shaper = audioCtx.createWaveShaper();
+      const curve = new Float32Array(1024);
+      for (let i = 0; i < curve.length; i += 1) {
+        curve[i] = Math.tanh((i / (curve.length - 1)) * 2 - 1);
+      }
+      shaper.curve = curve;
+      shaper.oversample = '4x';
       masterBus = audioCtx.createGain();
       masterBus.gain.value = 0.85;
-      masterBus.connect(audioLimiter);
-      audioLimiter.connect(audioCtx.destination);
+      masterBus.connect(dcBlock);
+      dcBlock.connect(shaper);
+      shaper.connect(audioCtx.destination);
     }
     if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
     return audioCtx;
   } catch {
     return null;
+  }
+}
+
+/* --- Диагностика аудио: один снимок на первых тиках ---
+   Нужна, чтобы отличить хлопок синтеза от сбоя аудиовыхода:
+   late — сколько раз старт ушёл в прошлом (гонка планирования);
+   rej — отсечено потолком голосов; skip — контекст не был запущен;
+   lag — насколько часы контекста отставали от стенных. */
+const audioDiag = {
+  tones: 0,
+  rejected: 0,
+  late: 0,
+  skipped: 0,
+  maxVoices: 0,
+  lagMs: 0,
+  lastWall: 0,
+  lastCtx: 0,
+  sent: false
+};
+
+function noteAudioClock(ctx) {
+  try {
+    const wall = performance.now();
+    const ct = ctx.currentTime;
+    if (audioDiag.lastWall) {
+      const lag = wall - audioDiag.lastWall - (ct - audioDiag.lastCtx) * 1000;
+      if (lag > audioDiag.lagMs) audioDiag.lagMs = Math.round(lag);
+    }
+    audioDiag.lastWall = wall;
+    audioDiag.lastCtx = ct;
+  } catch (e) {
+    /* диагностика не должна мешать звуку */
+  }
+}
+
+function sendAudioDiag(ctx) {
+  if (audioDiag.sent) return;
+  audioDiag.sent = true;
+  try {
+    const payload = JSON.stringify({
+      st: String(ctx.state || '?'),
+      sr: ctx.sampleRate || 0,
+      bl: Number((ctx.baseLatency || 0).toFixed(4)),
+      ol: Number((ctx.outputLatency || 0).toFixed(4)),
+      tones: audioDiag.tones,
+      rej: audioDiag.rejected,
+      late: audioDiag.late,
+      skip: audioDiag.skipped,
+      mv: audioDiag.maxVoices,
+      lag: audioDiag.lagMs
+    });
+    if (window.ZenBridge && typeof window.ZenBridge.audioDiag === 'function') {
+      window.ZenBridge.audioDiag(payload);
+    }
+  } catch (e) {
+    /* тихо */
   }
 }
 
@@ -509,17 +589,27 @@ function haptic(pattern) {
 function tone(ctx, { freq, endFreq, type = 'sine', dur = 0.3, vol = 0.12, attack = 0.006, delay = 0 }) {
   // Контекст ещё не разогрет: планирование в «замороженные» часы обрывает
   // огибающую — громкость вскакивает мгновенно, динамик хлопает.
-  if (ctx.state !== 'running') return false;
-  if (activeVoices >= MAX_VOICES) return false;
+  if (ctx.state !== 'running') {
+    audioDiag.skipped += 1;
+    return false;
+  }
+  if (activeVoices >= MAX_VOICES) {
+    audioDiag.rejected += 1;
+    return false;
+  }
 
-  const now = ctx.currentTime;
-  // Запас 8 мс: фаза атаки всегда попадает в будущее, даже если звук
-  // запланирован чуть позже реального старта контекста.
-  const t0 = Math.max(now + 0.008, now + delay);
-  const attackTime = Math.max(0.005, attack);
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
   osc.type = type;
+
+  // Часы контекста читаем как можно позже — прямо перед абсолютным
+  // планированием. Окно гонки между чтением и start() сокращается
+  // до микросекунд, а запас SCHEDULE_LEAD перекрывает задержки самого
+  // вызывающего кода.
+  const now = ctx.currentTime;
+  const t0 = now + SCHEDULE_LEAD + Math.max(0, delay);
+  const attackTime = Math.max(0.005, attack);
+
   osc.frequency.setValueAtTime(freq, t0);
   if (endFreq) osc.frequency.exponentialRampToValueAtTime(Math.max(20, endFreq), t0 + dur);
   gain.gain.setValueAtTime(0.0001, t0);
@@ -529,7 +619,13 @@ function tone(ctx, { freq, endFreq, type = 'sine', dur = 0.3, vol = 0.12, attack
   gain.gain.setValueAtTime(0, t0 + dur + 0.02);
   osc.connect(gain);
   gain.connect(masterBus || ctx.destination);
+
+  // Если часы контекста уже перепрыгнули за t0, огибающая проигрывается
+  // целиком в прошлом — фиксируем, чтобы диагностика это показала.
+  if (ctx.currentTime >= t0) audioDiag.late += 1;
+
   activeVoices += 1;
+  if (activeVoices > audioDiag.maxVoices) audioDiag.maxVoices = activeVoices;
   osc.onended = () => {
     activeVoices = Math.max(0, activeVoices - 1);
     try {
@@ -540,6 +636,11 @@ function tone(ctx, { freq, endFreq, type = 'sine', dur = 0.3, vol = 0.12, attack
   };
   osc.start(t0);
   osc.stop(t0 + dur + 0.05);
+
+  audioDiag.tones += 1;
+  noteAudioClock(ctx);
+  // Первые ~12 тиков (≈6 с на обычном интервале) — и отдаём снимок.
+  if (audioDiag.tones >= 12) sendAudioDiag(ctx);
   return true;
 }
 
