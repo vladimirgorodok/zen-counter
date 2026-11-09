@@ -463,6 +463,42 @@ public class MainActivity extends Activity {
             report("audio", payload, "", -1, "", "");
         }
 
+        /**
+         * Полноэкранный режим: прячем системные панели, пока идёт отсчёт и счёт.
+         * Возврат к обычному виду — по окончании сессии.
+         */
+        @android.webkit.JavascriptInterface
+        public void setImmersive(final int on) {
+            runOnUiThread(() -> {
+                try {
+                    final View decor = getWindow().getDecorView();
+                    if (android.os.Build.VERSION.SDK_INT >= 30) {
+                        android.view.WindowInsetsController ctrl = getWindow().getInsetsController();
+                        if (ctrl != null) {
+                            int bars = android.view.WindowInsets.Type.statusBars()
+                                    | android.view.WindowInsets.Type.navigationBars();
+                            if (on == 1) {
+                                ctrl.hide(bars);
+                                ctrl.setSystemBarsBehavior(android.view.WindowInsetsController
+                                        .BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                            } else {
+                                ctrl.show(bars);
+                            }
+                        }
+                    } else {
+                        int flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                                | View.SYSTEM_UI_FLAG_FULLSCREEN
+                                | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY;
+                        decor.setSystemUiVisibility(on == 1 ? flags : 0);
+                    }
+                } catch (Throwable ignored) {
+                }
+            });
+        }
+
         @android.webkit.JavascriptInterface
         public void vibrate(final int ms) {
             runOnUiThread(() -> {

@@ -336,8 +336,67 @@ function onCountdownAlarm() {
   armCountdown();
 }
 
+/* ================= Режим фокуса =================
+   В момент старта — отсчёт и счёт — прячем всю обвязку (шапку, навигацию,
+   пресет, интервал, кнопки) и уводим экран в полноэкранный режим.
+   Остаётся только сфера: жидкость, кольцо прогресса, цифры и анимации. */
+let focusMode = false;
+
+function enterFocus() {
+  if (focusMode) return;
+  focusMode = true;
+  // Старт возможен и с другой вкладки (пробел) — показываем счётчик.
+  // Важно сделать это ДО показа отсчёта: render() пересобирает DOM.
+  if (state.activeTab !== 'counter') {
+    state.activeTab = 'counter';
+    render();
+  }
+  document.body.classList.add('is-focus');
+  // В APK системные панели прячет нативный setImmersive, а веб-API
+  // полноэкранного режима в WebView лишь перекадрирует вьюпорт — поэтому
+  // requestFullscreen нужен только браузеру и PWA.
+  try {
+    const root = document.documentElement;
+    if (!window.ZenBridge && !document.fullscreenElement && typeof root.requestFullscreen === 'function') {
+      const req = root.requestFullscreen();
+      if (req && typeof req.catch === 'function') req.catch(() => {});
+    }
+  } catch (e) {
+    /* полноэкранный API недоступен — системные панели прячет обёртка */
+  }
+  try {
+    if (window.ZenBridge && typeof window.ZenBridge.setImmersive === 'function') {
+      window.ZenBridge.setImmersive(1);
+    }
+  } catch (e) {
+    /* обёртки нет (браузер) — обычный режим PWA */
+  }
+}
+
+function exitFocus() {
+  if (!focusMode) return;
+  focusMode = false;
+  document.body.classList.remove('is-focus');
+  try {
+    if (document.fullscreenElement && typeof document.exitFullscreen === 'function') {
+      const req = document.exitFullscreen();
+      if (req && typeof req.catch === 'function') req.catch(() => {});
+    }
+  } catch (e) {
+    /* ignore */
+  }
+  try {
+    if (window.ZenBridge && typeof window.ZenBridge.setImmersive === 'function') {
+      window.ZenBridge.setImmersive(0);
+    }
+  } catch (e) {
+    /* ignore */
+  }
+}
+
 function startRun() {
   const p = activePreset();
+  enterFocus();
   clearTimers();
   hideCountdown();
   if (p.count_up && state.count >= p.total_reps) state.count = 0;
@@ -381,6 +440,7 @@ function stopRun() {
   runMode = 'idle';
   hideCountdown();
   keepScreenOn(false);
+  exitFocus();
   persist(true);
   if (wasActive) updateCounter();
 }
@@ -413,6 +473,9 @@ function onComplete(p) {
   celebrate();
   completeFeedback(p);
   updateCounter();
+  // Автоцикл продолжит сессию сам — фокус не снимаем, чтобы экран не мигал.
+  // Без автоцкла возвращаем кнопки, иначе сбросить будет нечем.
+  if (!p.auto_loop) exitFocus();
 
   if (p.auto_loop) {
     completionTimerId = setTimeout(() => {

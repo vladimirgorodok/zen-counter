@@ -549,6 +549,41 @@ select:focus-visible {
   animation: screen-in 0.28s ease;
 }
 
+/* ---------- Режим фокуса (отсчёт и счёт) ----------
+   Весь интерфейс спрятан, экран полноэкранный: остаётся только сфера
+   с анимацией жидкости, кольцом прогресса и цифрами. */
+body.is-focus .app-header,
+body.is-focus .bottom-nav,
+body.is-focus .counter-screen > *:not(.dial-wrap) {
+  display: none !important;
+}
+
+body.is-focus .main-content {
+  padding: 0;
+  justify-content: center;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body.is-focus .screen {
+  flex: 1 1 auto;
+  justify-content: center;
+  gap: 0;
+  animation: none;
+}
+
+body.is-focus .dial {
+  width: min(90vw, 70vh, 500px);
+}
+
+body.is-focus .count-value {
+  font-size: clamp(64px, 26vw, 144px);
+}
+
+body.is-focus .count-caption {
+  font-size: 15px;
+}
+
 @keyframes screen-in {
   from {
     opacity: 0;

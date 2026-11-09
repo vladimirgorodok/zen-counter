@@ -308,11 +308,49 @@ try {
     const el = document.getElementById('countdown');
     return el && !el.classList.contains('is-hidden') ? el.textContent.replace(/\s+/g, ' ').trim() : '';
   });
+  const fsOn = await page.evaluate(() => !!document.fullscreenElement);
+  record('Полноэкранный режим включается по тапу', fsOn, `fullscreenElement=${fsOn}`);
+  // После тапа Firefox разворачивает вьюпорт до реального окна, а снимок
+  // кадрируется по старому размеру (сфера уходит за кадр) — возвращаем окно.
+  await page.evaluate(async () => {
+    if (document.fullscreenElement) await document.exitFullscreen();
+  });
+  await page.waitForTimeout(150);
   await shot('02-countdown');
   record('Обратный отсчёт отображается', !!cdVisible, cdVisible || 'не показан');
 
   await page.waitForFunction(() => window.__zen.mode === 'running', null, { timeout: 8000 });
   record('После отсчёта счётчик стартует сам', true);
+
+  /* Режим фокуса: во время счёта спрятана вся обвязка, остаётся сфера */
+  const focusOn = await page.evaluate(() => {
+    const d = (sel) => {
+      const el = document.querySelector(sel);
+      return el ? getComputedStyle(el).display : 'нет';
+    };
+    return {
+      cls: document.body.classList.contains('is-focus'),
+      header: d('.app-header'),
+      nav: d('.bottom-nav'),
+      strip: d('.preset-strip'),
+      transport: d('.transport'),
+      actions: d('.action-row'),
+      dial: d('.dial-wrap')
+    };
+  });
+  record(
+    'Режим фокуса: спрятана обвязка, осталась сфера',
+    focusOn.cls &&
+      focusOn.header === 'none' &&
+      focusOn.nav === 'none' &&
+      focusOn.strip === 'none' &&
+      focusOn.transport === 'none' &&
+      focusOn.actions === 'none' &&
+      focusOn.dial !== 'none',
+    `is-focus=${focusOn.cls} | header ${focusOn.header}, nav ${focusOn.nav}, ` +
+      `strip ${focusOn.strip}, transport ${focusOn.transport}, ` +
+      `actions ${focusOn.actions}, dial ${focusOn.dial}`
+  );
 
   // Цель
   await page.evaluate(() => {
@@ -334,6 +372,19 @@ try {
   }));
   record('Достижение цели останавливает счёт', doneState.count === doneState.goal, `count=${doneState.count}/${doneState.goal}`);
   await page.evaluate(() => window.__zen.stop());
+
+  const focusOff = await page.evaluate(() => {
+    const el = document.querySelector('.app-header');
+    return {
+      cls: document.body.classList.contains('is-focus'),
+      header: el ? getComputedStyle(el).display : 'нет'
+    };
+  });
+  record(
+    'Режим фокуса снимается после остановки',
+    !focusOff.cls && focusOff.header !== 'none',
+    `is-focus=${focusOff.cls}, header=${focusOff.header}`
+  );
 
   /* 6. Пресеты */
   await page.click('[data-action="tab"][data-tab="presets"]');
