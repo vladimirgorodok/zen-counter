@@ -9,6 +9,7 @@ import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
+import android.view.WindowInsets;
 import android.webkit.MimeTypeMap;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -80,6 +81,8 @@ public class MainActivity extends Activity {
 
     private WebView webView;
     private ValueCallback<Uri[]> filePathCallback;
+    /** Последние пришедшие инсеты — страница могла загрузиться позже них. */
+    private WindowInsets lastInsets;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -94,6 +97,24 @@ public class MainActivity extends Activity {
         webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
         setContentView(webView, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+        // Edge-to-edge: с targetSdk 35+ окно в любом случае рисуется под системными
+        // панелями. Включаем это явно и на более старых API, чтобы вёрстка была
+        // одинаковой: отступы панелей уходят в CSS (window.__applySafeArea).
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            getWindow().setDecorFitsSystemWindows(false);
+        } else {
+            getWindow().getDecorView().setSystemUiVisibility(
+                    View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                            | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                            | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+        }
+
+        webView.setOnApplyWindowInsetsListener((v, insets) -> {
+            lastInsets = insets;
+            applyWindowInsets(insets);
+            return insets;
+        });
 
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -118,6 +139,10 @@ public class MainActivity extends Activity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+                // Инсеты могли прийти до загрузки страницы — повторяем их в JS.
+                if (lastInsets != null) {
+                    applyWindowInsets(lastInsets);
+                }
                 // Через небольшую паузу проверяем, что документ отрисован как HTML
                 // и приложение запустилось; если нет — аварийная автономная загрузка.
                 view.postDelayed(() -> verifyRender(view, url), 400);
@@ -149,6 +174,35 @@ public class MainActivity extends Activity {
 
         webView.addJavascriptInterface(new Bridge(), "ZenBridge");
         webView.loadUrl(APP_URL);
+    }
+
+    /**
+     * Передаёт в приложение размеры системных панелей и вырезов: окно
+     * рисуется под ними (edge-to-edge), а отступы задаёт CSS.
+     */
+    private void applyWindowInsets(WindowInsets insets) {
+        try {
+            int top, right, bottom, left;
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                android.graphics.Insets sys = insets.getInsets(
+                        WindowInsets.Type.systemBars()
+                                | WindowInsets.Type.displayCutout());
+                top = sys.top;
+                right = sys.right;
+                bottom = sys.bottom;
+                left = sys.left;
+            } else {
+                top = insets.getSystemWindowInsetTop();
+                right = insets.getSystemWindowInsetRight();
+                bottom = insets.getSystemWindowInsetBottom();
+                left = insets.getSystemWindowInsetLeft();
+            }
+            if (webView == null) return;
+            String js = "if(window.__applySafeArea)window.__applySafeArea("
+                    + top + "," + right + "," + bottom + "," + left + ")";
+            webView.evaluateJavascript(js, null);
+        } catch (Throwable ignored) {
+        }
     }
 
     /** Отдаёт файл приложения из assets по https-адресу appassets.androidplatform.net. */

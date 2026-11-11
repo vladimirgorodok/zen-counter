@@ -84,6 +84,18 @@
     <div id="toast-root"></div>
     <div class="ambient" id="ambient" aria-hidden="true"></div>
 
+    <script>
+      // Отступы системных панелей. В APK их присылает MainActivity
+      // (edge-to-edge: окно рисуется под панелями, значения уходят в CSS).
+      // В браузере/PWA функция не вызывается и работает env()-фолбэк из CSS.
+      window.__applySafeArea = function (top, right, bottom, left) {
+        var r = document.documentElement;
+        r.style.setProperty('--inset-top', (top | 0) + 'px');
+        r.style.setProperty('--inset-right', (right | 0) + 'px');
+        r.style.setProperty('--inset-bottom', (bottom | 0) + 'px');
+        r.style.setProperty('--inset-left', (left | 0) + 'px');
+      };
+    </script>
     <script src="app.js" defer></script>
   </body>
 </html>

@@ -4,14 +4,32 @@ plugins {
 
 android {
     namespace 'com.zencounter.app'
-    compileSdk 34
+    compileSdk 36
 
     defaultConfig {
         applicationId "com.zencounter.app"
         minSdk 24
-        targetSdk 34
-        versionCode 5
-        versionName "1.0.4"
+        // Требование Google Play с 31.08.2026: новые приложения — Android 16 (API 36).
+        targetSdk 36
+        versionCode 6
+        versionName "1.0.5"
+    }
+
+    // Ключ публикации в Google Play: android/release.keystore + keystore.properties.
+    // Файлы не хранятся в git — их нужно держать локально и в надёжном бэкапе.
+    def ksFile = rootProject.file("release.keystore")
+    def ksProps = new Properties()
+    def ksPropsFile = rootProject.file("keystore.properties")
+    if (ksFile.exists() && ksPropsFile.exists()) {
+        ksPropsFile.withInputStream { ksProps.load(it) }
+        signingConfigs {
+            release {
+                storeFile ksFile
+                storePassword ksProps.getProperty('storePassword')
+                keyAlias ksProps.getProperty('keyAlias')
+                keyPassword ksProps.getProperty('keyPassword')
+            }
+        }
     }
 
     buildTypes {
@@ -21,9 +39,14 @@ android {
         release {
             minifyEnabled false
             shrinkResources false
-            // Для удобной установки APK подписывается debug-ключом.
-            // Для публикации создайте свой keystore и замените конфигурацию.
-            signingConfig signingConfigs.debug
+            // Play-сборка подписывается release-ключом (загрузочный ключ App Bundle).
+            // APK для GitHub собирается вручную и остаётся на debug-ключе,
+            // чтобы установленное из GitHub приложение обновлялось поверх.
+            if (ksFile.exists() && ksPropsFile.exists()) {
+                signingConfig signingConfigs.release
+            } else {
+                signingConfig signingConfigs.debug
+            }
         }
     }
 

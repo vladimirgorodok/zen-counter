@@ -13,11 +13,17 @@ BUILD="$ROOT/android/build-manual"
 DIST="$ROOT/dist"
 
 SDK="${ANDROID_HOME:-$ROOT/../_tools/android-sdk}"
-PLATFORM="$SDK/platforms/android-34/android.jar"
+# Ручной aapt читает arsc платформы 34 (новее он не понимает); targetSdk=36
+# задаётся в манифесте числом и от платформы компиляции не зависит.
+if [ -f "$SDK/platforms/android-34/android.jar" ]; then
+  PLATFORM="$SDK/platforms/android-34/android.jar"
+else
+  PLATFORM="$SDK/platforms/android-36/android.jar"
+fi
 BT="$SDK/build-tools/34.0.0"
 PKG="com.zencounter.app"
-VERSION="1.0.4"
-VERSION_CODE="5"
+VERSION="1.0.5"
+VERSION_CODE="6"
 
 need() {
   command -v "$1" >/dev/null 2>&1 || { echo "Не найдена команда: $1" >&2; exit 1; }
@@ -49,7 +55,7 @@ mkdir -p "$BUILD" "$DIST"
 
 echo "1/7 Манифест (package, версия, uses-sdk)"
 sed -e "s|<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">|<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\" package=\"$PKG\" android:versionCode=\"$VERSION_CODE\" android:versionName=\"$VERSION\">|" \
-    -e "s|    <application|    <uses-sdk android:minSdkVersion=\"24\" android:targetSdkVersion=\"34\" />\n    <application|" \
+    -e "s|    <application|    <uses-sdk android:minSdkVersion=\"24\" android:targetSdkVersion=\"36\" />\n    <application|" \
     "$MANIFEST_SRC" > "$BUILD/AndroidManifest.xml"
 grep -q "package=\"$PKG\"" "$BUILD/AndroidManifest.xml" || { echo "Не удалось вставить package" >&2; exit 1; }
 grep -q "uses-sdk" "$BUILD/AndroidManifest.xml" || { echo "Не удалось вставить uses-sdk" >&2; exit 1; }

@@ -416,13 +416,14 @@ try {
   await page.waitForTimeout(400);
   await shot('07-theme-sea-counter');
 
-  /* 8. Сохранение состояния */
+  /* 8. Сохранение состояния: при новом запуске счёт всегда 0,
+     остальное (интервал, звук, тема) сохраняется */
   await page.evaluate(() => {
     const p = window.__zen.state.presets.find((x) => x.id === window.__zen.state.activePresetId);
     window.__zen.setCountdown(0);
-    p.total_reps = 100; // цель больше счётчика: при загрузке count ограничивается целью
+    p.total_reps = 100;
     window.__zen.setIntervalMs(640);
-    window.__zen.state.count = 42;
+    window.__zen.state.count = 42; // накопленный счёт не должен пережить перезапуск
     window.__zen.state.muted = true;
     window.__zen.save();
   });
@@ -435,8 +436,8 @@ try {
     theme: window.__zen.state.themeId
   }));
   record(
-    'Состояние сохраняется после перезагрузки',
-    persisted.count === 42 && persisted.interval === 640 && persisted.muted === true && persisted.theme === 'sea',
+    'При новом запуске счёт 0, остальное сохраняется',
+    persisted.count === 0 && persisted.interval === 640 && persisted.muted === true && persisted.theme === 'sea',
     JSON.stringify(persisted)
   );
   await page.evaluate(() => window.__zen.skipSplash());

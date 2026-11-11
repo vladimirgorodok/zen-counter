@@ -157,7 +157,9 @@ function loadState() {
       ...base,
       presets,
       activePresetId,
-      count: clamp(Math.round(Number(raw.count) || 0), 0, presets.find((p) => p.id === activePresetId).total_reps),
+      // При новом запуске счётчик всегда начинается с нуля: накопленный счёт
+      // живёт только внутри сессии. Остальное (тема, пресеты, звук) сохраняется.
+      count: 0,
       themeId: THEMES[raw.themeId] ? raw.themeId : base.themeId,
       activeTab: ['counter', 'presets', 'settings'].includes(raw.activeTab) ? raw.activeTab : 'counter',
       muted: !!raw.muted

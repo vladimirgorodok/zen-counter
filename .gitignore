@@ -10,6 +10,10 @@ android/app/build/
 android/local.properties
 android/app/src/main/assets/www/
 android/debug.keystore
+# Ключи публикации (существуют только локально — держать в бэкапе!)
+android/release.keystore
+android/keystore.properties
+*.idsig.bak
 
 # Редакторы и система
 .idea/
